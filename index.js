@@ -1,222 +1,203 @@
-const Discord = require(`discord.js`);
-const { Client, Collection, MessageEmbed,MessageAttachment } = require(`discord.js`);
-const { readdirSync } = require(`fs`);
-const { join } = require(`path`);
-const db = require('quick.db');
-const { TOKEN, PREFIX, AVATARURL, BOTNAME, } = require(`./config.json`);
-const figlet = require("figlet");
-const client = new Client({ disableMentions: `` , partials: ['MESSAGE', 'CHANNEL', 'REACTION'] });
-FiiX.login('');
-client.commands = new Collection();
-client.setMaxListeners(0);
-client.prefix = PREFIX;
-client.queue = new Map();
-const cooldowns = new Collection();
-const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`);
+# ========================================================
+# Trademark IBRAA – All rights reserved.
+# This bot is protected under IBRAA intellectual property.
+# ========================================================
 
-//this fires when the BOT STARTS DO NOT TOUCH
-client.on(`ready`, () => {	
-//////////////
+import discord
+from discord.ext import commands
+import json
+import os
+import asyncio
+from typing import Optional, List
 
-////////
-   
-   ///////////////////////////////
-    ////////////IFCHEMPTY//////////
-        //remove everything in between those 2 big comments if you want to disable that the bot leaves when ch. or queue gets empty!
-        setInterval(() => { 
-          let member;
-        client.guilds.cache.forEach(async guild =>{
-        await delay(15);
-          member = await client.guilds.cache.get(guild.id).members.cache.get(client.user.id)
-        //if not connected
-          if(!member.voice.channel)
-          return;
-        //if alone 
-        if (member.voice.channel.members.size === 1) 
-        { return member.voice.channel.leave(); }
-      });
+# ---------- CONFIG ----------
+CONFIG_FILE = "config.json"
+DATA_FILE = "data.json"
 
-    
-    client.user.setActivity(`${PREFIX}help | ${client.guilds.cache.size} Server,Users ${client.guilds.cache.reduce((a, g) => a + g.memberCount, 0)},`, { type: "LISTENING"});
-   
-  
-      }, (5000));
-      ////////////////////////////////
-      ////////////////////////////////
-    figlet.text(`${client.user.username} ready!`, function (err, data) {
-      if (err) {
-          console.log('Something went wrong');
-          console.dir(err);
-      }
-      console.log(`═════════════════════════════════════════════════════════════════════════════`);
-      console.log(data)
-      console.log(`═════════════════════════════════════════════════════════════════════════════`);
-    })
-   
-});
-//DO NOT TOUCH
-//FOLDERS:
-//Admin custommsg data FUN General Music NSFW others
-commandFiles = readdirSync(join(__dirname, `Music`)).filter((file) => file.endsWith(`.js`));
-for (const file of commandFiles) {
-  const command = require(join(__dirname, `Music`, `${file}`));
-  client.commands.set(command.name, command);
-}
-commandFiles = readdirSync(join(__dirname, `others`)).filter((file) => file.endsWith(`.js`));
-for (const file of commandFiles) {
-  const command = require(join(__dirname, `others`, `${file}`));
-  client.commands.set(command.name, command);
-}
-//COMMANDS //DO NOT TOUCH
-client.on(`message`, async (message) => {
-  if (message.author.bot) return;
-  
-  //getting prefix 
-  let prefix = await db.get(`prefix_${message.guild.id}`)
-  //if not prefix set it to standard prefix in the config.json file
-  if(prefix === null) prefix = PREFIX;
+if not os.path.exists(CONFIG_FILE):
+    raise FileNotFoundError(
+        f"Missing {CONFIG_FILE}. Copy config.json.example to config.json and add your token."
+    )
 
-  //information message when the bot has been tagged
-  if(message.content.includes(client.user.id)) {
-    message.reply(new Discord.MessageEmbed()
-                  .setColor("#146DF6")
-                 .setDescription(`
-Support Server - [Click Me](https://discord.gg/u4CbGW4qTT)
-Bot Link - [Click Me](https://discord.com/oauth2/authorize?client_id=758785943426564187&permissions=1076132928&scope=bot)
-`)
-                  .setTitle(`
-Join a voice channel and \`s!play\` a song.
-Type \`s!help\` for the list of commands.`));
-  } 
-  //An embed announcement for everyone but no one knows so fine ^w^
-  if(message.content.startsWith(`${prefix}embed`)){
-    //define saymsg
-    const saymsg = message.content.slice(Number(prefix.length) + 5)
-    //define embed
-    const embed = new Discord.MessageEmbed()
-    .setColor("#146DF6")
-    .setDescription(saymsg)
-    .setFooter("Reyna", client.user.displayAvatarURL())
-    //delete the Command
-    message.delete({timeout: 300})
-    //send the Message
-    message.channel.send(embed)
-  }
+with open(CONFIG_FILE, "r") as f:
+    config = json.load(f)
+TOKEN = config.get("token")
+if not TOKEN:
+    raise ValueError("Bot token not found in config.json")
 
+# ---------- DATA MANAGER ----------
+class DataManager:
+    """Thread‑safe JSON storage for guild settings."""
+    def __init__(self, filepath: str):
+        self.filepath = filepath
+        self._lock = asyncio.Lock()
+        self._data = {}
+        self._load()
 
-//An join announcement for everyone but no one knows so fine ^w^
+    def _load(self):
+        if os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, "r") as f:
+                    self._data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                self._data = {}
+        else:
+            self._data = {}
+        if "guilds" not in self._data:
+            self._data["guilds"] = {}
 
-client.on("guildCreate" , DarkMan => {
-  if(DarkMan.memberCount < 500 ){
-    console.log(`  name ( ${DarkMan.name} ) zhmaray memberakan ( ${DarkMan.memberCount}) created by DarkMan`)//by DarkMan
-    DarkMan.leave();
-  }
-})
+    async def save(self):
+        async with self._lock:
+            try:
+                with open(self.filepath, "w") as f:
+                    json.dump(self._data, f, indent=4)
+            except IOError as e:
+                print(f"❌ Failed to save data: {e}")
 
+    def get_guild_data(self, guild_id: int) -> dict:
+        gid = str(guild_id)
+        if gid not in self._data["guilds"]:
+            self._data["guilds"][gid] = {
+                "keywords": [],
+                "log_channel": None
+            }
+        return self._data["guilds"][gid]
 
-//An suuport announcement for everyone but no one knows so fine ^w^
-  if(message.content.startsWith(`${prefix}support`)){
-    //define saymsg
-    const saymsg = message.content.slice(Number(prefix.length) + 5)
-    //define embed
-    const embed = new Discord.MessageEmbed()
-    .setColor("#146DF6")
-    .setDescription (`
-    Links
+    async def add_keyword(self, guild_id: int, keyword: str) -> bool:
+        data = self.get_guild_data(guild_id)
+        kw = keyword.lower()
+        if kw in data["keywords"]:
+            return False
+        data["keywords"].append(kw)
+        await self.save()
+        return True
 
-[Support](https://discord.gg/jcs4XwcExv)
--
-[Invite](https://discord.com/oauth2/authorize?client_id=806840212608909344&permissions=70346817&scope=bot)`)
-    .setFooter(message.author.username, message.author.displayAvatarURL)
-    .setImage(``)
-    .setTitle(`**Support Reyna**`) 
-    .setThumbnail(`https://cdn.discordapp.com/avatars/806840212608909344/bf2d9853ffc2b48775c0cf9f8932a189.png?size=1024`)
-    .setTimestamp()
-    
-    //send the Message
-    message.channel.send(embed)
-   message.react("<:emoji_4:815583574983966720>")
-  } 
-   
-client.on("guildCreate" , DarkMan => {
-  if(DarkMan.memberCount < 500){
-    console.log(`  name ( ${DarkMan.name} ) zhmaray memberakan ( ${DarkMan.memberCount}) created by DarkMan`)//by DarkMan
-    DarkMan.leave();
-  }
-})
+    async def remove_keyword(self, guild_id: int, keyword: str) -> bool:
+        data = self.get_guild_data(guild_id)
+        kw = keyword.lower()
+        if kw not in data["keywords"]:
+            return False
+        data["keywords"].remove(kw)
+        await self.save()
+        return True
 
-//command Handler DO NOT TOUCH
- const prefixRegex = new RegExp(`^(<@!?${client.user.id}>|${escapeRegex(prefix)})\\s*`);
- if (!prefixRegex.test(message.content)) return;
- const [, matchedPrefix] = message.content.match(prefixRegex);
- const args = message.content.slice(matchedPrefix.length).trim().split(/ +/);
- const commandName = args.shift().toLowerCase();
- const command =
-   client.commands.get(commandName) ||
-   client.commands.find((cmd) => cmd.aliases && cmd.aliases.includes(commandName));
- if (!command) return;
- if (!cooldowns.has(command.name)) {
-   cooldowns.set(command.name, new Collection());
- }
- const now = Date.now();
- const timestamps = cooldowns.get(command.name);
- const cooldownAmount = (command.cooldown || 1) * 1000;
- if (timestamps.has(message.author.id)) {
-   const expirationTime = timestamps.get(message.author.id) + cooldownAmount;
-   if (now < expirationTime) {
-     const timeLeft = (expirationTime - now) / 1000;
-     return message.reply(
-      new MessageEmbed().setColor("#146DF6")
-      .setTitle(`<:emoji_4:815583574983966720> \`Please wait ${timeLeft.toFixed(1)} seconds before reusing the ${prefix}${command.name}\`!`)    
-     );
-   }
- }
- timestamps.set(message.author.id, now);
- setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
- try {
-   command.execute(message, args, client);
- } catch (error) {
-   console.error(error);
-   message.reply( new MessageEmbed().setColor("#146DF6")
-   .setTitle(`<:emoji_4:815583574983966720> There was an error executing that command.`)).catch(console.error);
- }
+    def list_keywords(self, guild_id: int) -> List[str]:
+        return self.get_guild_data(guild_id)["keywords"].copy()
 
+    async def set_log_channel(self, guild_id: int, channel_id: Optional[int]):
+        data = self.get_guild_data(guild_id)
+        data["log_channel"] = channel_id
+        await self.save()
 
-});
+    def get_log_channel(self, guild_id: int) -> Optional[int]:
+        return self.get_guild_data(guild_id).get("log_channel")
 
-client.on("guildCreate", guild => {
-  let channel = client.channels.cache.get("829675413470969886");
-  let embed = new MessageEmbed().setColor("#146DF6")
-  .setAuthor(client.user.username, client.user.avatarURL())
-  .setTitle( `✅ Join Server`)
-  .addField("🔠 **Server Name**", `${guild.name}`)
-  .addField("👑 **Server Owner**", `${guild.owner}`)
-  .addField("🆔 **Server Id**", `${guild.id}`)
-  .addField("👥 **Member Count**", `${guild.memberCount}`)
-  .setFooter(`${client.user.tag}`);
-  channel.send(embed);
-});
+# ---------- BOT SETUP ----------
+intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+bot = commands.Bot(command_prefix="!", intents=intents)
+data_manager = DataManager(DATA_FILE)
 
-client.on("guildDelete", guild => {
-  let channel = client.channels.cache.get("829675413470969886");
-  let embed = new MessageEmbed()
-  .setColor("#146DF6")
-  .setAuthor(client.user.username, client.user.avatarURL())
-  .setTitle( `❌ Left Server`)
-  .addField("🔠 **Server Name**", `${guild.name}`)
-  .addField("👑 **Server Owner**", `${guild.owner}`)
-  .addField("🆔 **Server Id**", `${guild.id}`)
-  .addField("👥 **Member Count**", `${guild.memberCount}`)
-  .setFooter(`${client.user.tag}`);
-  channel.send(embed);
-});
+# ---------- EVENTS ----------
+@bot.event
+async def on_ready():
+    print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
+    print(f"📁 Data file: {DATA_FILE}")
+    print(f"🔷 Trademark IBRAA – All rights reserved.")
 
-function delay(delayInms) {
- return new Promise(resolve => {
-   setTimeout(() => {
-     resolve(2);
-   }, delayInms);
- });
-}
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
 
-//Bot coded by Tomato#6966 
+    await bot.process_commands(message)
+
+    keywords = data_manager.list_keywords(message.guild.id)
+    if not keywords:
+        return
+
+    content_lower = message.content.lower()
+    matched = [kw for kw in keywords if kw in content_lower]
+    if not matched:
+        return
+
+    log_channel_id = data_manager.get_log_channel(message.guild.id)
+    if log_channel_id:
+        channel = message.guild.get_channel(log_channel_id)
+        if channel:
+            embed = discord.Embed(
+                title="🔍 Keyword Detected",
+                description=f"**{message.author.mention}** said:",
+                color=discord.Color.orange()
+            )
+            embed.add_field(name="Message", value=message.content[:1024], inline=False)
+            embed.add_field(name="Matched Keywords", value=", ".join(f"`{kw}`" for kw in matched), inline=False)
+            embed.add_field(name="Jump", value=f"[Click here]({message.jump_url})", inline=False)
+            embed.set_footer(text=f"Channel: #{message.channel.name} • Trademark IBRAA")
+            try:
+                await channel.send(embed=embed)
+            except discord.Forbidden:
+                print(f"⚠️ Missing permissions to send to log channel in {message.guild.name}")
+        else:
+            print(f"⚠️ Log channel {log_channel_id} not found in {message.guild.name}")
+
+# ---------- COMMANDS ----------
+@bot.command(name="addkeyword", aliases=["addkw"])
+@commands.has_permissions(administrator=True)
+async def add_keyword(ctx, *, keyword: str):
+    if len(keyword) < 2:
+        await ctx.send("❌ Keyword must be at least 2 characters.")
+        return
+    success = await data_manager.add_keyword(ctx.guild.id, keyword)
+    if success:
+        await ctx.send(f"✅ Keyword `{keyword}` added.")
+    else:
+        await ctx.send(f"❌ Keyword `{keyword}` already exists.")
+
+@bot.command(name="removekeyword", aliases=["rmkw"])
+@commands.has_permissions(administrator=True)
+async def remove_keyword(ctx, *, keyword: str):
+    success = await data_manager.remove_keyword(ctx.guild.id, keyword)
+    if success:
+        await ctx.send(f"✅ Keyword `{keyword}` removed.")
+    else:
+        await ctx.send(f"❌ Keyword `{keyword}` not found.")
+
+@bot.command(name="listkeywords", aliases=["listkw", "keywords"])
+async def list_keywords(ctx):
+    keywords = data_manager.list_keywords(ctx.guild.id)
+    if not keywords:
+        await ctx.send("📭 No keywords are currently being tracked.")
+        return
+    kw_list = "\n".join(f"• `{kw}`" for kw in keywords)
+    await ctx.send(f"📋 Tracked keywords ({len(keywords)}):\n{kw_list}")
+
+@bot.command(name="setlogchannel", aliases=["setlog"])
+@commands.has_permissions(administrator=True)
+async def set_log_channel(ctx, channel: discord.TextChannel = None):
+    if channel is None:
+        await data_manager.set_log_channel(ctx.guild.id, None)
+        await ctx.send("🔕 Keyword alerts disabled.")
+    else:
+        await data_manager.set_log_channel(ctx.guild.id, channel.id)
+        await ctx.send(f"📢 Keyword alerts will be sent to {channel.mention}")
+
+# Error handling
+@add_keyword.error
+@remove_keyword.error
+@set_log_channel.error
+async def command_error(ctx, error):
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ You need administrator permissions to use this command.")
+    else:
+        await ctx.send(f"⚠️ An error occurred: {error}")
+
+# ---------- START BOT ----------
+if __name__ == "__main__":
+    try:
+        bot.run(TOKEN)
+    except discord.LoginFailure:
+        print("❌ Invalid bot token. Please check config.json.")
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
