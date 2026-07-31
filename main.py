@@ -578,7 +578,18 @@ async def on_command_error(ctx, error):
     else:
         await ctx.send(f"⚠️ Unexpected error: {error}")
         print(f"Error: {error}")
+from flask import Flask
+import threading
 
+app = Flask('')
+@app.route('/')
+def home():
+    return "IBRAA Bot is running!"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+threading.Thread(target=run_web, daemon=True).start()
 # ---------- KEEP-ALIVE WEB SERVER (for Render etc.) ----------
 # Optional: uncomment if you want to keep the bot alive on web hosts
 # from flask import Flask
