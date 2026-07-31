@@ -7,7 +7,7 @@
 #  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
 #  ╔═══════════════════════════════════════════════════════════════════════════╗
 #  ║               MEGA BOT – IBRAA TRADEMARK                              ║
-#  ║         Keyword Tracker • Moderation • Music • Security               ║
+#  ║              Keyword Tracker • Moderation • Security                  ║
 #  ╚═══════════════════════════════════════════════════════════════════════════╝
 #  📌 Version: 4.0.0  |  🐍 Python 3.10+  |  🎯 Discord.py 2.3.2
 # ══════════════════════════════════════════════════════════════════════════════
@@ -18,7 +18,6 @@ from discord.ext import commands
 import json
 import os
 import asyncio
-import re
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
@@ -208,173 +207,9 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.members = True
-intents.voice_states = True
+# intents.voice_states = True  # نەپێویستە، لابرا
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 data_manager = DataManager(DATA_FILE)
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  🎵 MUSIC PLAYER – Luna Style
-# ══════════════════════════════════════════════════════════════════════════════
-import yt_dlp
-
-class MusicPlayer:
-    """🎵 Advanced music player with queue, loop, and volume control."""
-    
-    def __init__(self, bot):
-        self.bot = bot
-        self.queues: Dict[int, asyncio.Queue] = {}
-        self.current: Dict[int, Optional[dict]] = {}
-        self.voice_clients: Dict[int, discord.VoiceClient] = {}
-        self.loops: Dict[int, bool] = {}
-        self.volume: Dict[int, float] = {}
-
-    # ──── CONNECTION ────────────────────────────────────────────────────────────
-    async def connect(self, ctx: commands.Context):
-        """🔗 Connect to the user's voice channel."""
-        if not ctx.author.voice:
-            await ctx.send("❌ You're not in a voice channel.")
-            return None
-        if ctx.guild.voice_client is None:
-            vc = await ctx.author.voice.channel.connect()
-            self.voice_clients[ctx.guild.id] = vc
-            self.queues[ctx.guild.id] = asyncio.Queue()
-            self.current[ctx.guild.id] = None
-            self.loops[ctx.guild.id] = False
-            self.volume[ctx.guild.id] = 1.0
-            return vc
-        else:
-            if ctx.guild.voice_client.channel != ctx.author.voice.channel:
-                await ctx.guild.voice_client.move_to(ctx.author.voice.channel)
-            return ctx.guild.voice_client
-
-    # ──── STREAM SOURCE ────────────────────────────────────────────────────────
-    async def get_source(self, url: str):
-        """📡 Extract audio stream from YouTube."""
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': True,
-            'no_warnings': True,
-        }
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                return discord.FFmpegPCMAudio(
-                    info['url'],
-                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-                )
-        except Exception as e:
-            print(f"🎵 Music error: {e}")
-            return None
-
-    # ──── QUEUE MANAGEMENT ──────────────────────────────────────────────────────
-    async def add_to_queue(self, ctx: commands.Context, url: str):
-        """➕ Add a song to the queue."""
-        guild_id = ctx.guild.id
-        if guild_id not in self.queues:
-            await self.connect(ctx)
-            if guild_id not in self.queues:
-                return False
-
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                song = {
-                    'title': info.get('title', 'Unknown'),
-                    'url': info.get('webpage_url', url),
-                    'duration': info.get('duration', 0),
-                    'thumbnail': info.get('thumbnail', None),
-                    'uploader': info.get('uploader', 'Unknown')
-                }
-        except Exception as e:
-            await ctx.send(f"❌ Error: {e}")
-            return False
-
-        await self.queues[guild_id].put(song)
-        if not self.voice_clients.get(guild_id) or not self.voice_clients[guild_id].is_playing():
-            asyncio.create_task(self.play_next(guild_id))
-        return True
-
-    # ──── PLAYBACK ──────────────────────────────────────────────────────────────
-    async def play_next(self, guild_id: int):
-        """▶️ Play the next song in queue."""
-        if guild_id not in self.queues:
-            return
-
-        if self.loops.get(guild_id, False) and self.current.get(guild_id):
-            await self.queues[guild_id].put(self.current[guild_id])
-
-        try:
-            song = await asyncio.wait_for(self.queues[guild_id].get(), timeout=60.0)
-        except asyncio.TimeoutError:
-            vc = self.voice_clients.get(guild_id)
-            if vc and vc.is_connected():
-                await vc.disconnect()
-            self.voice_clients.pop(guild_id, None)
-            self.queues.pop(guild_id, None)
-            self.current.pop(guild_id, None)
-            self.loops.pop(guild_id, None)
-            self.volume.pop(guild_id, None)
-            return
-
-        self.current[guild_id] = song
-        vc = self.voice_clients.get(guild_id)
-        if not vc:
-            return
-
-        source = await self.get_source(song['url'])
-        if source is None:
-            await self.play_next(guild_id)
-            return
-
-        source.volume = self.volume.get(guild_id, 1.0)
-        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
-            self.play_next(guild_id), self.bot.loop
-        ))
-
-    # ──── PLAYER CONTROLS ──────────────────────────────────────────────────────
-    async def skip(self, ctx: commands.Context):
-        """⏭️ Skip the current song."""
-        guild_id = ctx.guild.id
-        vc = self.voice_clients.get(guild_id)
-        if vc and vc.is_playing():
-            vc.stop()
-            await ctx.send("⏭️ Skipped.")
-        else:
-            await ctx.send("❌ Nothing playing.")
-
-    async def stop(self, ctx: commands.Context):
-        """⏹️ Stop playback and clear queue."""
-        guild_id = ctx.guild.id
-        vc = self.voice_clients.get(guild_id)
-        if vc:
-            vc.stop()
-            self.queues[guild_id] = asyncio.Queue()
-            await vc.disconnect()
-            self.voice_clients.pop(guild_id, None)
-            await ctx.send("⏹️ Stopped and cleared queue.")
-        else:
-            await ctx.send("❌ Not connected.")
-
-    async def set_volume(self, ctx: commands.Context, vol: int):
-        """🔊 Adjust playback volume."""
-        if vol < 0 or vol > 200:
-            await ctx.send("❌ Volume must be between 0-200.")
-            return
-        guild_id = ctx.guild.id
-        self.volume[guild_id] = vol / 100.0
-        vc = self.voice_clients.get(guild_id)
-        if vc and vc.is_playing():
-            vc.source.volume = self.volume[guild_id]
-        await ctx.send(f"🔊 Volume set to {vol}%.")
-
-# ──── INSTANTIATE ──────────────────────────────────────────────────────────────
-music_player = MusicPlayer(bot)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  🛡️ SECURITY MANAGER – Anti-Spam & Raid Protection
@@ -799,85 +634,6 @@ async def unlock(ctx):
         await ctx.send("🔓 Server unlocked.")
     except discord.Forbidden:
         await ctx.send("❌ I don't have permission to do that.")
-
-# ──── MUSIC COMMANDS ─────────────────────────────────────────────────────────
-
-@bot.command(name="play", aliases=["p"])
-async def play(ctx, *, query: str):
-    """🎵 Play a song from YouTube."""
-    await music_player.connect(ctx)
-    if not re.match(r'https?://', query):
-        query = f"ytsearch:{query}"
-    success = await music_player.add_to_queue(ctx, query)
-    if success:
-        await ctx.send("🎵 Added to queue.")
-
-@bot.command(name="skip", aliases=["s"])
-async def skip(ctx):
-    """⏭️ Skip the current song."""
-    await music_player.skip(ctx)
-
-@bot.command(name="stop", aliases=["leave"])
-async def stop(ctx):
-    """⏹️ Stop playback and leave the voice channel."""
-    await music_player.stop(ctx)
-
-@bot.command(name="queue", aliases=["q"])
-async def show_queue(ctx):
-    """📋 Show the current queue."""
-    guild_id = ctx.guild.id
-    q = music_player.queues.get(guild_id)
-    if q is None or q.empty():
-        await ctx.send("📭 Queue is empty.")
-        return
-    items = []
-    for _ in range(min(10, q.qsize())):
-        item = await q.get()
-        items.append(item)
-        await q.put(item)
-    if not items:
-        await ctx.send("📭 Queue is empty.")
-        return
-    embed = discord.Embed(title="🎶 Queue", color=discord.Color.blue())
-    for i, song in enumerate(items):
-        embed.add_field(
-            name=f"{i+1}. {song['title']}",
-            value=f"by {song['uploader']}",
-            inline=False
-        )
-    await ctx.send(embed=embed)
-
-@bot.command(name="nowplaying", aliases=["np"])
-async def now_playing(ctx):
-    """🎵 Show the currently playing song."""
-    guild_id = ctx.guild.id
-    current = music_player.current.get(guild_id)
-    if current is None:
-        await ctx.send("❌ Nothing playing.")
-        return
-    embed = discord.Embed(title="🎵 Now Playing", color=discord.Color.green())
-    embed.add_field(name="Title", value=current['title'], inline=False)
-    embed.add_field(name="Uploader", value=current['uploader'], inline=False)
-    if current.get('thumbnail'):
-        embed.set_thumbnail(url=current['thumbnail'])
-    await ctx.send(embed=embed)
-
-@bot.command(name="volume", aliases=["vol"])
-async def volume(ctx, vol: int = None):
-    """🔊 Adjust or view playback volume."""
-    if vol is None:
-        current_vol = music_player.volume.get(ctx.guild.id, 1.0) * 100
-        await ctx.send(f"🔊 Current volume: {int(current_vol)}%")
-    else:
-        await music_player.set_volume(ctx, vol)
-
-@bot.command(name="loop")
-async def loop(ctx):
-    """🔁 Toggle loop mode."""
-    guild_id = ctx.guild.id
-    current = music_player.loops.get(guild_id, False)
-    music_player.loops[guild_id] = not current
-    await ctx.send(f"🔁 Loop {'enabled' if not current else 'disabled'}.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  🚨 ERROR HANDLING
