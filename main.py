@@ -1,18 +1,18 @@
 # ========================================================
 # Trademark IBRAA – All rights reserved.
-# This bot is protected under IBRAA intellectual property.
 # ========================================================
 
 import discord
 from discord.ext import commands
-from discord import app_commands
 import json
 import os
 import asyncio
-import re
-from typing import Optional, List, Dict
-import yt_dlp
+from typing import Optional, List
 from dotenv import load_dotenv
+
+# ---------- WEBSERVER FOR RENDER (MUST BE OUTSIDE try/except) ----------
+from flask import Flask
+import threading
 
 # ---------- ENVIRONMENT ----------
 load_dotenv()
@@ -63,7 +63,6 @@ class DataManager:
             }
         return self._data["guilds"][gid]
 
-    # ---------- KEYWORD METHODS ----------
     async def add_keyword(self, guild_id: int, keyword: str) -> bool:
         data = self.get_guild_data(guild_id)
         kw = keyword.lower()
@@ -85,7 +84,6 @@ class DataManager:
     def list_keywords(self, guild_id: int) -> List[str]:
         return self.get_guild_data(guild_id)["keywords"].copy()
 
-    # ---------- LOG CHANNEL ----------
     async def set_log_channel(self, guild_id: int, channel_id: Optional[int]):
         data = self.get_guild_data(guild_id)
         data["log_channel"] = channel_id
@@ -94,7 +92,6 @@ class DataManager:
     def get_log_channel(self, guild_id: int) -> Optional[int]:
         return self.get_guild_data(guild_id).get("log_channel")
 
-    # ---------- MUTE ROLE ----------
     async def set_mute_role(self, guild_id: int, role_id: Optional[int]):
         data = self.get_guild_data(guild_id)
         data["mute_role"] = role_id
@@ -103,7 +100,6 @@ class DataManager:
     def get_mute_role(self, guild_id: int) -> Optional[int]:
         return self.get_guild_data(guild_id).get("mute_role")
 
-    # ---------- WARNINGS ----------
     async def add_warn(self, guild_id: int, user_id: int, reason: str, moderator_id: int) -> int:
         data = self.get_guild_data(guild_id)
         warns = data["warns"].setdefault(str(user_id), [])
@@ -135,161 +131,15 @@ class DataManager:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
-intents.members = True          # for warnings / mod actions
-intents.voice_states = True     # for music
+intents.members = True
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
 data_manager = DataManager(DATA_FILE)
-
-# ---------- MUSIC PLAYER ----------
-class MusicPlayer:
-    """Per‑guild music player."""
-    def __init__(self, bot):
-        self.bot = bot
-        self.queues: Dict[int, asyncio.Queue] = {}
-        self.current: Dict[int, Optional[dict]] = {}
-        self.voice_clients: Dict[int, discord.VoiceClient] = {}
-        self.loops: Dict[int, bool] = {}
-        self.volume: Dict[int, float] = {}
-
-    async def get_voice_client(self, guild_id: int) -> Optional[discord.VoiceClient]:
-        return self.voice_clients.get(guild_id)
-
-    async def connect(self, ctx: commands.Context):
-        if ctx.author.voice is None:
-            await ctx.send("❌ You are not in a voice channel.")
-            return None
-        if ctx.guild.voice_client is None:
-            vc = await ctx.author.voice.channel.connect()
-            self.voice_clients[ctx.guild.id] = vc
-            self.queues[ctx.guild.id] = asyncio.Queue()
-            self.current[ctx.guild.id] = None
-            self.loops[ctx.guild.id] = False
-            self.volume[ctx.guild.id] = 1.0
-            return vc
-        else:
-            if ctx.guild.voice_client.channel != ctx.author.voice.channel:
-                await ctx.guild.voice_client.move_to(ctx.author.voice.channel)
-            return ctx.guild.voice_client
-
-    async def play_next(self, guild_id: int):
-        if guild_id not in self.queues:
-            return
-        queue = self.queues[guild_id]
-        if self.loops.get(guild_id, False) and self.current.get(guild_id):
-            # Re-add current to front
-            await queue.put(self.current[guild_id])
-        try:
-            next_song = await asyncio.wait_for(queue.get(), timeout=60.0)
-        except asyncio.TimeoutError:
-            # Disconnect after 60s of empty queue
-            vc = self.voice_clients.get(guild_id)
-            if vc and vc.is_connected():
-                await vc.disconnect()
-            self.voice_clients.pop(guild_id, None)
-            self.queues.pop(guild_id, None)
-            self.current.pop(guild_id, None)
-            self.loops.pop(guild_id, None)
-            self.volume.pop(guild_id, None)
-            return
-
-        self.current[guild_id] = next_song
-        vc = self.voice_clients.get(guild_id)
-        if not vc:
-            return
-        source = await self.get_source(next_song['url'])
-        if source is None:
-            await self.play_next(guild_id)
-            return
-        source.volume = self.volume.get(guild_id, 1.0)
-        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(guild_id), self.bot.loop))
-
-    async def get_source(self, url: str):
-        """Extract audio stream with yt-dlp."""
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': True,
-            'no_warnings': True,
-        }
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                url2 = info['url']
-                return discord.FFmpegPCMAudio(url2, before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5")
-        except Exception as e:
-            print(f"Error getting source: {e}")
-            return None
-
-    async def add_to_queue(self, ctx: commands.Context, url: str):
-        guild_id = ctx.guild.id
-        if guild_id not in self.queues:
-            await self.connect(ctx)
-            if guild_id not in self.queues:
-                return False
-        # Extract info
-        ydl_opts = {'format': 'bestaudio/best', 'quiet': True}
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                song = {
-                    'title': info.get('title', 'Unknown'),
-                    'url': info.get('webpage_url', url),
-                    'duration': info.get('duration', 0),
-                    'thumbnail': info.get('thumbnail', None),
-                    'uploader': info.get('uploader', 'Unknown')
-                }
-        except Exception as e:
-            await ctx.send(f"❌ Could not fetch song: {e}")
-            return False
-
-        await self.queues[guild_id].put(song)
-        # If not playing, start
-        if not self.voice_clients.get(guild_id, None) or not self.voice_clients[guild_id].is_playing():
-            asyncio.create_task(self.play_next(guild_id))
-        return True
-
-    async def skip(self, ctx: commands.Context):
-        guild_id = ctx.guild.id
-        vc = self.voice_clients.get(guild_id)
-        if vc and vc.is_playing():
-            vc.stop()
-            await ctx.send("⏭️ Skipped.")
-        else:
-            await ctx.send("❌ Nothing is playing.")
-
-    async def stop(self, ctx: commands.Context):
-        guild_id = ctx.guild.id
-        vc = self.voice_clients.get(guild_id)
-        if vc:
-            vc.stop()
-            self.queues[guild_id] = asyncio.Queue()
-            await vc.disconnect()
-            self.voice_clients.pop(guild_id, None)
-            await ctx.send("⏹️ Stopped and cleared queue.")
-        else:
-            await ctx.send("❌ Not connected.")
-
-    async def set_volume(self, ctx: commands.Context, vol: int):
-        if vol < 0 or vol > 200:
-            await ctx.send("❌ Volume must be between 0 and 200.")
-            return
-        guild_id = ctx.guild.id
-        self.volume[guild_id] = vol / 100.0
-        vc = self.voice_clients.get(guild_id)
-        if vc and vc.is_playing():
-            vc.source.volume = self.volume[guild_id]
-        await ctx.send(f"🔊 Volume set to {vol}%.")
 
 # ---------- BOT EVENTS ----------
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user} (ID: {bot.user.id})")
     print(f"🔷 Trademark IBRAA – All rights reserved.")
-    await bot.tree.sync()  # Sync slash commands (if any)
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -298,7 +148,6 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-    # Keyword tracking
     keywords = data_manager.list_keywords(message.guild.id)
     if keywords:
         content_lower = message.content.lower()
@@ -323,7 +172,6 @@ async def on_message(message: discord.Message):
                         pass
 
 # ---------- COMMANDS ----------
-# ----- Keyword commands -----
 @bot.command(name="addkeyword", aliases=["addkw"])
 @commands.has_permissions(administrator=True)
 async def add_keyword(ctx, *, keyword: str):
@@ -363,7 +211,6 @@ async def set_log_channel(ctx, channel: discord.TextChannel = None):
         await data_manager.set_log_channel(ctx.guild.id, channel.id)
         await ctx.send(f"📢 Alerts will go to {channel.mention}")
 
-# ----- Moderation commands (ProBot style) -----
 @bot.command(name="kick")
 @commands.has_permissions(kick_members=True)
 async def kick(ctx, member: discord.Member, *, reason: str = "No reason provided."):
@@ -486,84 +333,6 @@ async def remove_warn(ctx, member: discord.Member, warn_id: int):
     else:
         await ctx.send(f"❌ Warning #{warn_id} not found for {member}.")
 
-# ----- Music commands (Luna style) -----
-music_player = MusicPlayer(bot)
-
-@bot.command(name="play", aliases=["p"])
-async def play(ctx, *, query: str):
-    """Play a song from YouTube."""
-    vc = await music_player.connect(ctx)
-    if vc is None:
-        return
-    # If query is a URL, use as is; else search
-    if not re.match(r'https?://', query):
-        query = f"ytsearch:{query}"
-    success = await music_player.add_to_queue(ctx, query)
-    if success:
-        await ctx.send(f"🎵 Added to queue.")
-
-@bot.command(name="skip", aliases=["next"])
-async def skip(ctx):
-    await music_player.skip(ctx)
-
-@bot.command(name="stop", aliases=["disconnect", "leave"])
-async def stop(ctx):
-    await music_player.stop(ctx)
-
-@bot.command(name="queue", aliases=["q"])
-async def show_queue(ctx):
-    guild_id = ctx.guild.id
-    q = music_player.queues.get(guild_id)
-    if q is None or q.empty():
-        await ctx.send("📭 Queue is empty.")
-        return
-    # Get up to 10 items
-    items = []
-    for _ in range(min(10, q.qsize())):
-        item = await q.get()
-        items.append(item)
-        await q.put(item)  # put back
-    if not items:
-        await ctx.send("📭 Queue is empty.")
-        return
-    embed = discord.Embed(title="🎶 Queue", color=discord.Color.blue())
-    for i, song in enumerate(items):
-        embed.add_field(
-            name=f"{i+1}. {song['title']}",
-            value=f"by {song['uploader']}",
-            inline=False
-        )
-    await ctx.send(embed=embed)
-
-@bot.command(name="nowplaying", aliases=["np"])
-async def now_playing(ctx):
-    guild_id = ctx.guild.id
-    current = music_player.current.get(guild_id)
-    if current is None:
-        await ctx.send("❌ Nothing playing.")
-        return
-    embed = discord.Embed(title="🎵 Now Playing", color=discord.Color.green())
-    embed.add_field(name="Title", value=current['title'], inline=False)
-    embed.add_field(name="Uploader", value=current['uploader'], inline=False)
-    if current.get('thumbnail'):
-        embed.set_thumbnail(url=current['thumbnail'])
-    await ctx.send(embed=embed)
-
-@bot.command(name="volume", aliases=["vol"])
-async def volume(ctx, vol: int = None):
-    if vol is None:
-        current_vol = music_player.volume.get(ctx.guild.id, 1.0) * 100
-        await ctx.send(f"🔊 Current volume: {int(current_vol)}%")
-    else:
-        await music_player.set_volume(ctx, vol)
-
-@bot.command(name="loop")
-async def loop(ctx):
-    guild_id = ctx.guild.id
-    current = music_player.loops.get(guild_id, False)
-    music_player.loops[guild_id] = not current
-    await ctx.send(f"🔁 Loop {'enabled' if not current else 'disabled'}.")
-
 # ---------- ERROR HANDLING ----------
 @bot.event
 async def on_command_error(ctx, error):
@@ -574,30 +343,12 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.BadArgument):
         await ctx.send(f"❌ Bad argument: {error}")
     elif isinstance(error, commands.CommandNotFound):
-        pass  # ignore
+        pass
     else:
         await ctx.send(f"⚠️ Unexpected error: {error}")
         print(f"Error: {error}")
 
-# ---------- KEEP-ALIVE WEB SERVER (for Render etc.) ----------
-# Optional: uncomment if you want to keep the bot alive on web hosts
-# from flask import Flask
-# import threading
-# app = Flask('')
-# @app.route('/')
-# def home():
-#     return "IBRAA Bot is running!"
-# def run_web():
-#     app.run(host='0.0.0.0', port=8080)
-# threading.Thread(target=run_web, daemon=True).start()
-
-# ---------- START BOT ----------
-if __name__ == "__main__":
-    try:
-     from flask import Flask
-import threading
-import os
-
+# ---------- KEEP-ALIVE WEB SERVER (CORRECTLY PLACED) ----------
 app = Flask('')
 
 @app.route('/')
@@ -608,8 +359,12 @@ def run_web():
     port = int(os.getenv("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# Start web server in background
+# Start web server in background thread
 threading.Thread(target=run_web, daemon=True).start()
+
+# ---------- START BOT (WITH PROPER try/except) ----------
+if __name__ == "__main__":
+    try:
         bot.run(TOKEN)
     except discord.LoginFailure:
         print("❌ Invalid token.")
