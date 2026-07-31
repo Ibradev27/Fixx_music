@@ -10,10 +10,6 @@ import asyncio
 from typing import Optional, List
 from dotenv import load_dotenv
 
-# ---------- WEBSERVER FOR RENDER (MUST BE OUTSIDE try/except) ----------
-from flask import Flask
-import threading
-
 # ---------- ENVIRONMENT ----------
 load_dotenv()
 TOKEN = os.getenv("TOKEN")
@@ -25,7 +21,6 @@ PREFIX = os.getenv("PREFIX", "!")
 DATA_FILE = "data.json"
 
 class DataManager:
-    """Thread‑safe JSON storage for guild data."""
     def __init__(self, filepath: str):
         self.filepath = filepath
         self._lock = asyncio.Lock()
@@ -145,7 +140,6 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot or not message.guild:
         return
-
     await bot.process_commands(message)
 
     keywords = data_manager.list_keywords(message.guild.id)
@@ -348,21 +342,7 @@ async def on_command_error(ctx, error):
         await ctx.send(f"⚠️ Unexpected error: {error}")
         print(f"Error: {error}")
 
-# ---------- KEEP-ALIVE WEB SERVER (CORRECTLY PLACED) ----------
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "IBRAA Bot is running!"
-
-def run_web():
-    port = int(os.getenv("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# Start web server in background thread
-threading.Thread(target=run_web, daemon=True).start()
-
-# ---------- START BOT (WITH PROPER try/except) ----------
+# ---------- START BOT ----------
 if __name__ == "__main__":
     try:
         bot.run(TOKEN)
