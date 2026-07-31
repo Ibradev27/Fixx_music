@@ -183,9 +183,9 @@ async def add_keyword(ctx, *, keyword: str):
 async def remove_keyword(ctx, *, keyword: str):
     success = await data_manager.remove_keyword(ctx.guild.id, keyword)
     if success:
-        await ctx.send(f"✅ Keyword `{keyword}` removed.")
+        await ctx.send(f" Keyword `{keyword}` removed.")
     else:
-        await ctx.send(f"❌ Keyword `{keyword}` not found.")
+        await ctx.send(f" Keyword `{keyword}` not found.")
 
 @bot.command(name="listkeywords", aliases=["listkw", "keywords"])
 async def list_keywords(ctx):
@@ -210,9 +210,9 @@ async def set_log_channel(ctx, channel: discord.TextChannel = None):
 async def kick(ctx, member: discord.Member, *, reason: str = "No reason provided."):
     try:
         await member.kick(reason=reason)
-        await ctx.send(f"👢 **{member}** was kicked. Reason: {reason}")
+        await ctx.send(f"👢 **{member}** دەرکرا لە سێرڤەر. Reason: {reason}")
     except discord.Forbidden:
-        await ctx.send("❌ I don't have permission to kick that user.")
+        await ctx.send(" توانام نییە ئەم کەسە دەر بکەم .")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
@@ -223,7 +223,7 @@ async def ban(ctx, member: discord.Member, *, reason: str = "No reason provided.
         await member.ban(reason=reason)
         await ctx.send(f"🔨 **{member}** was banned. Reason: {reason}")
     except discord.Forbidden:
-        await ctx.send("❌ I don't have permission to ban that user.")
+        await ctx.send(" نـاتوانم ئەم کـەسـە باند بـکەم.")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
@@ -233,18 +233,18 @@ async def unban(ctx, *, user_name: str):
     async for ban_entry in ctx.guild.bans():
         if ban_entry.user.name == user_name or str(ban_entry.user) == user_name:
             await ctx.guild.unban(ban_entry.user)
-            await ctx.send(f"✅ Unbanned {ban_entry.user.mention}")
+            await ctx.send(f"✅ باند لابرا {ban_entry.user.mention}")
             return
-    await ctx.send(f"❌ User '{user_name}' not found in ban list.")
+    await ctx.send(f" بەڕێز '{user_name}' نەدۆزرایەوە لە لیستی باندکراوەکان.")
 
 @bot.command(name="clear", aliases=["purge"])
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
     if amount < 1:
-        await ctx.send("❌ Amount must be at least 1.")
+        await ctx.send(" Amount must be at least 1.")
         return
     if amount > 1000:
-        await ctx.send("❌ Cannot delete more than 1000 messages at once.")
+        await ctx.send(" بەیەک جار ناتوانی لە هەزار نامە زیاترڕەشکەیتەوو.")
         return
     deleted = await ctx.channel.purge(limit=amount + 1)
     await ctx.send(f"🧹 Deleted {len(deleted) - 1} messages.", delete_after=5)
@@ -254,17 +254,17 @@ async def clear(ctx, amount: int):
 async def mute(ctx, member: discord.Member, *, reason: str = "No reason provided."):
     mute_role_id = data_manager.get_mute_role(ctx.guild.id)
     if mute_role_id is None:
-        await ctx.send("❌ No mute role set. Use `!setmuterole @role`")
+        await ctx.send(" No mute role set. Use `!setmuterole @role`")
         return
     role = ctx.guild.get_role(mute_role_id)
     if role is None:
-        await ctx.send("❌ Mute role not found. Reset it with `!setmuterole`")
+        await ctx.send(" Mute role not found. Reset it with `!setmuterole`")
         return
     try:
         await member.add_roles(role, reason=reason)
         await ctx.send(f"🔇 **{member}** muted. Reason: {reason}")
     except discord.Forbidden:
-        await ctx.send("❌ I don't have permission to mute that user.")
+        await ctx.send(" توانام نییە ئەم کەسە باند بکەم.")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
@@ -273,17 +273,17 @@ async def mute(ctx, member: discord.Member, *, reason: str = "No reason provided
 async def unmute(ctx, member: discord.Member):
     mute_role_id = data_manager.get_mute_role(ctx.guild.id)
     if mute_role_id is None:
-        await ctx.send("❌ No mute role set.")
+        await ctx.send(" No mute role set.")
         return
     role = ctx.guild.get_role(mute_role_id)
     if role is None:
-        await ctx.send("❌ Mute role not found.")
+        await ctx.send(" Mute role not found.")
         return
     try:
         await member.remove_roles(role)
         await ctx.send(f"🔊 **{member}** unmuted.")
     except discord.Forbidden:
-        await ctx.send("❌ I don't have permission to unmute that user.")
+        await ctx.send(" ناتوانم میوتی ئەم کەسە لابدەم.")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
@@ -301,7 +301,7 @@ async def set_mute_role(ctx, role: discord.Role = None):
 @commands.has_permissions(manage_messages=True)
 async def warn(ctx, member: discord.Member, *, reason: str = "No reason provided."):
     warn_id = await data_manager.add_warn(ctx.guild.id, member.id, reason, ctx.author.id)
-    await ctx.send(f"⚠️ **{member}** warned (ID: {warn_id}). Reason: {reason}")
+    await ctx.send(f"⚠️ **{member}** ئاگادارکرایتەوە وریابە  (ID: {warn_id}). Reason: {reason}")
 
 @bot.command(name="warns")
 async def warns(ctx, member: discord.Member):
@@ -323,15 +323,15 @@ async def warns(ctx, member: discord.Member):
 async def remove_warn(ctx, member: discord.Member, warn_id: int):
     success = await data_manager.remove_warn(ctx.guild.id, member.id, warn_id)
     if success:
-        await ctx.send(f"✅ Removed warning #{warn_id} from {member}.")
+        await ctx.send(f"ئاگادار کردنەوە لادرا #{warn_id} لەسەر {member}.")
     else:
-        await ctx.send(f"❌ Warning #{warn_id} not found for {member}.")
+        await ctx.send(f"❌ ئاگادارکردنەوە #{warn_id} نەدۆزرایەوە لەسەر {member}.")
 
 # ---------- ERROR HANDLING ----------
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You don't have permission to use this command.")
+        await ctx.send(" تۆ توانات نییە ئەم کۆماندە بەکاربێنیت.")
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(f"❌ Missing argument: {error.param}")
     elif isinstance(error, commands.BadArgument):
