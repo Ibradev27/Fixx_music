@@ -578,15 +578,24 @@ async def on_command_error(ctx, error):
     else:
         await ctx.send(f"⚠️ Unexpected error: {error}")
         print(f"Error: {error}")
-from flask import Flask
-import threading
 
-app = Flask('')
-@app.route('/')
-def home():
-    return "IBRAA Bot is running!"
+# ---------- KEEP-ALIVE WEB SERVER (for Render etc.) ----------
+# Optional: uncomment if you want to keep the bot alive on web hosts
+# from flask import Flask
+# import threading
+# app = Flask('')
+# @app.route('/')
+# def home():
+#     return "IBRAA Bot is running!"
+# def run_web():
+#     app.run(host='0.0.0.0', port=8080)
+# threading.Thread(target=run_web, daemon=True).start()
 
-def run_web():
-    app.run(host='0.0.0.0', port=8080)
-
-threading.Thread(target=run_web, daemon=True).
+# ---------- START BOT ----------
+if __name__ == "__main__":
+    try:
+        bot.run(TOKEN)
+    except discord.LoginFailure:
+        print("❌ Invalid token.")
+    except Exception as e:
+        print(f"❌ Fatal error: {e}")
